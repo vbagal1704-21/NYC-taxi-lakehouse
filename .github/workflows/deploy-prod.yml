@@ -1,0 +1,32 @@
+# =============================================================================
+# Deploy to PROD — triggered by publishing a GitHub Release (version tag),
+# gated by a required reviewer on the 'prod' GitHub environment.
+# This is the standard enterprise promotion: code reaches prod only as a
+# tagged, approved release.
+# =============================================================================
+name: Deploy to prod
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency: deploy-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod           # configure "Required reviewers" on this env
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t prod
+
+      - name: Deploy bundle to prod
+        run: databricks bundle deploy -t prod

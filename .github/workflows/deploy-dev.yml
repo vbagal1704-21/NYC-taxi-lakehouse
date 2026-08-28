@@ -1,0 +1,29 @@
+# =============================================================================
+# Deploy to DEV — automatic on every merge to main.
+# =============================================================================
+name: Deploy to dev
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: deploy-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev            # GitHub environment holding dev secrets
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t dev
+
+      - name: Deploy bundle to dev
+        run: databricks bundle deploy -t dev

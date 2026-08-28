@@ -1,0 +1,118 @@
+# =============================================================================
+# Job definitions (Databricks Workflows) — serverless compute (Free Edition)
+# =============================================================================
+# taxi_setup_job    : one-time environment bootstrap (catalog/schemas/volumes)
+# taxi_pipeline_job : the main end-to-end pipeline
+#                     landing -> bronze -> silver -> DQ -> gold -> recon
+# =============================================================================
+
+resources:
+  jobs:
+
+    # -------------------------------------------------------------------------
+    # One-time setup job: creates schemas, volumes, ops tables for the target
+    # catalog. Run once per environment after first deploy.
+    # -------------------------------------------------------------------------
+    taxi_setup_job:
+      name: "taxi_setup_${var.env}"
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: env
+          default: ${var.env}
+      tasks:
+        - task_key: setup_environment
+          notebook_task:
+            notebook_path: ../src/notebooks/00_setup_environment.py
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+    # -------------------------------------------------------------------------
+    # Main pipeline job
+    # -------------------------------------------------------------------------
+    taxi_pipeline_job:
+      name: "taxi_pipeline_${var.env}"
+
+      # Job-level parameters — every task can read these via dbutils.widgets
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: env
+          default: ${var.env}
+        - name: run_month
+          default: ${var.run_month}
+        - name: full_refresh
+          default: "false"
+        - name: job_run_id
+          default: "{{job.run_id}}"
+
+      # Monthly schedule — TLC publishes data with ~2 month lag.
+      # dev: auto-paused by development mode; uat: paused by preset.
+      schedule:
+        quartz_cron_expression: "0 0 6 5 * ?"   # 06:00 on the 5th of each month
+        timezone_id: "Asia/Kolkata"
+        pause_status: UNPAUSED
+
+      max_concurrent_runs: 1
+
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+
+      tasks:
+        - task_key: ingest_landing
+          notebook_task:
+            notebook_path: ../src/notebooks/01_ingest_landing.py
+
+        - task_key: bronze_autoload
+          depends_on:
+            - task_key: ingest_landing
+          notebook_task:
+            notebook_path: ../src/notebooks/02_bronze_autoloader.py
+
+        - task_key: dq_bronze
+          depends_on:
+            - task_key: bronze_autoload
+          notebook_task:
+            notebook_path: ../src/notebooks/03_dq_checks.py
+            base_parameters:
+              dq_layer: bronze
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: dq_bronze
+          notebook_task:
+            notebook_path: ../src/notebooks/04_silver_transform.py
+
+        - task_key: dq_silver
+          depends_on:
+            - task_key: silver_transform
+          notebook_task:
+            notebook_path: ../src/notebooks/03_dq_checks.py
+            base_parameters:
+              dq_layer: silver
+
+        - task_key: gold_dimensions
+          depends_on:
+            - task_key: dq_silver
+          notebook_task:
+            notebook_path: ../src/notebooks/05_gold_dimensions.py
+
+        - task_key: gold_fact
+          depends_on:
+            - task_key: gold_dimensions
+          notebook_task:
+            notebook_path: ../src/notebooks/06_gold_fact.py
+
+        - task_key: gold_aggregates
+          depends_on:
+            - task_key: gold_fact
+          notebook_task:
+            notebook_path: ../src/notebooks/07_gold_aggregates.py
+
+        - task_key: reconciliation
+          depends_on:
+            - task_key: gold_aggregates
+          notebook_task:
+            notebook_path: ../src/notebooks/08_reconciliation.py

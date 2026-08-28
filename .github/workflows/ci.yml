@@ -1,0 +1,31 @@
+# =============================================================================
+# CI — runs on every pull request and push to main.
+# Gate 1 of the promotion path: nothing reaches any environment without
+# passing lint + unit tests.
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Unit tests (pytest + local Spark/Delta)
+        run: pytest

@@ -1,0 +1,19 @@
+[project]
+name = "nyc-taxi-lakehouse"
+version = "1.0.0"
+description = "Enterprise-style NYC Taxi lakehouse on Databricks (medallion, DQ, recon, DABs, CI/CD)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src/lib"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = ["src/notebooks"]   # notebooks use Databricks magics/globals
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]

@@ -1,0 +1,42 @@
+# =============================================================================
+# Deploy to UAT — manual promotion, optionally runs the pipeline for a chosen
+# month so testers can validate against fresh data.
+# =============================================================================
+name: Deploy to UAT
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_pipeline:
+        description: "Run the pipeline after deploying?"
+        type: boolean
+        default: false
+      run_month:
+        description: "Month to process if running (YYYY-MM)"
+        default: "2024-01"
+
+concurrency: deploy-uat
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: uat            # GitHub environment holding uat secrets
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validate bundle
+        run: databricks bundle validate -t uat
+
+      - name: Deploy bundle to uat
+        run: databricks bundle deploy -t uat
+
+      - name: Run pipeline in uat
+        if: ${{ inputs.run_pipeline }}
+        run: |
+          databricks bundle run -t uat taxi_pipeline_job \
+            --params run_month=${{ inputs.run_month }}

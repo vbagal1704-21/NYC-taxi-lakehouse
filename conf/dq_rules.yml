@@ -1,0 +1,88 @@
+# =============================================================================
+# Data-quality rules — evaluated by taxi_lakehouse.quality.dq_engine
+# =============================================================================
+# severity: error -> fail the pipeline | warn -> record and continue
+# layer:    which pipeline stage runs the rule (bronze | silver | gold)
+# Table names are relative to the environment catalog.
+# =============================================================================
+
+rules:
+  # ---- bronze: did ingestion land sane data? --------------------------------
+  - name: bronze_trips_not_empty
+    layer: bronze
+    table: bronze.yellow_trips_raw
+    type: row_count_min
+    threshold: 1
+    severity: error
+
+  - name: bronze_source_file_populated
+    layer: bronze
+    table: bronze.yellow_trips_raw
+    type: not_null
+    column: _source_file
+    severity: error
+
+  - name: bronze_zones_loaded
+    layer: bronze
+    table: bronze.taxi_zone_lookup
+    type: row_count_min
+    threshold: 250          # NYC has 265 zones
+    severity: error
+
+  # ---- silver: contract of the cleansed table -------------------------------
+  - name: silver_pickup_ts_not_null
+    layer: silver
+    table: silver.yellow_trips
+    type: not_null
+    column: pickup_ts
+    severity: error
+
+  - name: silver_trip_hash_unique
+    layer: silver
+    table: silver.yellow_trips
+    type: unique
+    column: trip_hash
+    severity: error
+
+  - name: silver_total_amount_range
+    layer: silver
+    table: silver.yellow_trips
+    type: range
+    column: total_amount
+    min: 0
+    max: 10000
+    severity: error
+
+  - name: silver_trip_distance_range
+    layer: silver
+    table: silver.yellow_trips
+    type: range
+    column: trip_distance
+    min: 0
+    max: 500
+    severity: error
+
+  - name: silver_payment_type_accepted
+    layer: silver
+    table: silver.yellow_trips
+    type: accepted_values
+    column: payment_type_id
+    values: [0, 1, 2, 3, 4, 5, 6]
+    severity: warn
+
+  - name: silver_zones_referential
+    layer: silver
+    table: silver.yellow_trips
+    type: referential
+    column: pickup_zone_id
+    ref_table: bronze.taxi_zone_lookup
+    ref_column: LocationID
+    severity: warn
+
+  - name: silver_freshness
+    layer: silver
+    table: silver.yellow_trips
+    type: freshness
+    column: pickup_ts
+    max_age_days: 1200       # TLC publishes with a lag; loosen/tighten as needed
+    severity: warn

@@ -1,0 +1,7 @@
+# Local development & CI only — the Databricks serverless runtime already
+# ships Spark/Delta. Pin versions for reproducible CI.
+pyspark==3.5.3
+delta-spark==3.2.0
+pytest==8.3.4
+pyyaml==6.0.2
+ruff==0.8.4

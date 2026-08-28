@@ -1,0 +1,68 @@
+# =============================================================================
+# Databricks Asset Bundle — NYC Taxi Lakehouse
+# =============================================================================
+# One bundle, three deployment targets (dev / uat / prod).
+# On Databricks Free Edition there is a single workspace + metastore, so
+# environment isolation is achieved at the Unity Catalog level:
+#   dev  -> catalog taxi_dev
+#   uat  -> catalog taxi_uat
+#   prod -> catalog taxi_prod
+#
+# Deploy:   databricks bundle deploy -t dev
+# Run:      databricks bundle run  -t dev taxi_pipeline_job
+# =============================================================================
+
+bundle:
+  name: nyc_taxi_lakehouse
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for this environment
+    default: taxi_dev
+  env:
+    description: Environment name (dev / uat / prod)
+    default: dev
+  run_month:
+    description: "Default month of TLC data to process (YYYY-MM). Overridable at run time."
+    default: "2024-01"
+  notification_email:
+    description: Email for job failure notifications
+    default: vbagal1704@gmail.com
+
+include:
+  - resources/*.yml
+
+# -----------------------------------------------------------------------------
+# Targets — one per environment
+# -----------------------------------------------------------------------------
+targets:
+  dev:
+    default: true
+    mode: development          # resources get a user prefix, schedules auto-paused
+    variables:
+      catalog: taxi_dev
+      env: dev
+    workspace:
+      root_path: ~/.bundle/${bundle.name}/${bundle.target}
+
+  uat:
+    mode: production
+    variables:
+      catalog: taxi_uat
+      env: uat
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/uat
+    presets:
+      name_prefix: "[UAT] "
+      trigger_pause_status: PAUSED   # UAT runs on demand, not on schedule
+
+  prod:
+    mode: production
+    variables:
+      catalog: taxi_prod
+      env: prod
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/prod
+    presets:
+      name_prefix: "[PROD] "
+      trigger_pause_status: UNPAUSED
