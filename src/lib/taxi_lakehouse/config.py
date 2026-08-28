@@ -5,7 +5,6 @@ same code runs unchanged in dev / uat / prod.
 
 from dataclasses import dataclass, field
 
-
 SCHEMAS = ["landing", "bronze", "silver", "gold", "ops"]
 
 # Public TLC endpoints (CloudFront distribution used by nyc.gov TLC page)

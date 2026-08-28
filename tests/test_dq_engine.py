@@ -2,7 +2,6 @@
 (`spark_catalog`) in place of a Unity Catalog catalog."""
 
 import pytest
-
 from taxi_lakehouse.config import Config
 from taxi_lakehouse.quality.dq_engine import DQError, run_dq_checks
 

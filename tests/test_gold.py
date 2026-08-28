@@ -3,7 +3,6 @@
 from datetime import date, datetime
 
 import pytest
-
 from taxi_lakehouse.transforms.gold import build_dim_date, build_fact, scd2_apply
 
 
