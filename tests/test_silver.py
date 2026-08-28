@@ -3,7 +3,6 @@
 from datetime import datetime
 
 from pyspark.sql import functions as F
-
 from taxi_lakehouse.transforms.silver import (
     add_derived_columns,
     add_validity_flags,

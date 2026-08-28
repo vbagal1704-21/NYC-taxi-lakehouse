@@ -88,9 +88,22 @@ def standardize_columns(df: DataFrame) -> DataFrame:
 
 
 def deduplicate(df: DataFrame) -> DataFrame:
-    """Keep one row per business key (latest ingested wins)."""
-    order_col = F.col("_ingested_at").desc() if "_ingested_at" in df.columns else F.lit(1)
-    w = Window.partitionBy(*BUSINESS_KEY).orderBy(order_col)
+    """Keep one row per business key (latest ingested wins).
+
+    The final tie-break is a hash of the entire row: rows in one Auto Loader
+    batch share the same _ingested_at, and Spark plans are lazily re-executed,
+    so without a deterministic total order two evaluations of this plan could
+    pick different survivors for the same key.
+    """
+    row_fingerprint = F.sha2(
+        F.concat_ws("§", *[F.coalesce(F.col(c).cast("string"), F.lit("")) for c in df.columns]),
+        256,
+    )
+    order_cols = []
+    if "_ingested_at" in df.columns:
+        order_cols.append(F.col("_ingested_at").desc())
+    order_cols.append(row_fingerprint.desc())
+    w = Window.partitionBy(*BUSINESS_KEY).orderBy(*order_cols)
     return df.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1").drop("_rn")
 
 
@@ -106,6 +119,8 @@ def add_validity_flags(df: DataFrame) -> DataFrame:
         ),
         ((F.col("trip_distance") < 0) | (F.col("trip_distance") > 500), "invalid_trip_distance"),
         (F.col("total_amount") <= 0, "non_positive_total_amount"),
+        # keep quarantine aligned with the DQ contract (dq_rules.yml: 0..10000)
+        (F.col("total_amount") > 10000, "total_amount_above_cap"),
         ((F.col("passenger_count") < 0) | (F.col("passenger_count") > 8), "invalid_passenger_count"),
         (F.col("pickup_zone_id").isNull() | F.col("dropoff_zone_id").isNull(), "null_zone_id"),
     ]
@@ -181,10 +196,23 @@ def run_silver(spark, cfg) -> dict:
     if full_load:
         increment = bronze
     else:
-        processed = spark.table(cfg.silver_trips).select("_source_file").distinct()
-        quarantined = spark.table(cfg.silver_quarantine).select("_source_file").distinct()
-        done = processed.union(quarantined).distinct()
-        increment = bronze.join(done, on="_source_file", how="left_anti")
+        # CRITICAL: collect the processed-file list EAGERLY. If this were left
+        # as a lazy anti-join against silver, the quarantine MERGE below would
+        # re-execute the plan AFTER the clean MERGE already inserted this
+        # file's rows into silver — the anti-join would then exclude the very
+        # file being processed and the quarantine write would get an empty
+        # input (real incident: silently lost all quarantine rows per month).
+        done_files = {
+            r["_source_file"]
+            for r in spark.table(cfg.silver_trips).select("_source_file").distinct().collect()
+        } | {
+            r["_source_file"]
+            for r in spark.table(cfg.silver_quarantine).select("_source_file").distinct().collect()
+        }
+        increment = (
+            bronze.filter(~F.col("_source_file").isin(list(done_files)))
+            if done_files else bronze
+        )
 
     n_input = increment.count()
     if n_input == 0:
@@ -193,8 +221,12 @@ def run_silver(spark, cfg) -> dict:
     clean, quarantine = transform_to_silver(increment)
 
     # Stable output contract (drift-proof): only the agreed silver columns.
-    clean = clean.select(*SILVER_COLUMNS)
-    quarantine = quarantine.select(*SILVER_COLUMNS, "dq_violations")
+    # Persist both frames so the two MERGEs below reuse one materialisation
+    # instead of re-executing the transform twice.
+    clean = clean.select(*SILVER_COLUMNS).persist()
+    quarantine = quarantine.select(*SILVER_COLUMNS, "dq_violations").persist()
+    n_clean = clean.count()
+    n_quar = quarantine.count()
 
     if full_load:
         clean.write.mode("overwrite").option("overwriteSchema", "true") \
@@ -205,6 +237,6 @@ def run_silver(spark, cfg) -> dict:
         _merge_insert_only(spark, clean, cfg.silver_trips, "_silver_clean_stage")
         _merge_insert_only(spark, quarantine, cfg.silver_quarantine, "_silver_quar_stage")
 
-    n_clean = clean.count()
-    n_quar = quarantine.count()
+    clean.unpersist()
+    quarantine.unpersist()
     return {"rows_in": n_input, "rows_clean": n_clean, "rows_quarantined": n_quar, "skipped": False}
